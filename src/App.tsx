@@ -19,7 +19,8 @@ import {
   orderBy, 
   limit, 
   serverTimestamp,
-  deleteDoc
+  deleteDoc,
+  runTransaction
 } from 'firebase/firestore';
 
 const CalendarDigit = ({ digit }: { digit: string; key?: string }) => (
@@ -60,6 +61,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
+  const [processingLikes, setProcessingLikes] = useState<Record<string, boolean>>({});
   const dropdownRef = useRef<HTMLDivElement>(null);
   
   // Pagination State
@@ -419,43 +421,51 @@ export default function App() {
 
   const handleLike = async (photoId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!auth.currentUser) return;
+    if (!auth.currentUser || processingLikes[photoId]) return;
 
     const userId = auth.currentUser.uid;
     const likeId = `${userId}_${photoId}`;
-    const isLiked = userLikes[photoId];
+    
+    setProcessingLikes(prev => ({ ...prev, [photoId]: true }));
 
     try {
-      if (isLiked) {
-        // Unlike
-        await deleteDoc(doc(db, 'likes', likeId));
-        await updateDoc(doc(db, 'photo_stats', photoId), {
-          likesCount: increment(-1)
-        });
-      } else {
-        // Like
+      await runTransaction(db, async (transaction) => {
+        const likeRef = doc(db, 'likes', likeId);
         const statsRef = doc(db, 'photo_stats', photoId);
-        const statsSnap = await getDoc(statsRef);
+        
+        const likeDoc = await transaction.get(likeRef);
+        const statsDoc = await transaction.get(statsRef);
+        
+        const currentLikes = statsDoc.exists() ? (statsDoc.data().likesCount || 0) : 0;
 
-        if (!statsSnap.exists()) {
-          await setDoc(statsRef, { likesCount: 1 });
+        if (likeDoc.exists()) {
+          // Unlike: Remove the like record and decrement count
+          transaction.delete(likeRef);
+          transaction.set(statsRef, { 
+            likesCount: Math.max(0, currentLikes - 1) 
+          }, { merge: true });
         } else {
-          await updateDoc(statsRef, { likesCount: increment(1) });
+          // Like: Add the like record and increment count
+          transaction.set(likeRef, {
+            userId,
+            photoId,
+            createdAt: serverTimestamp()
+          });
+          transaction.set(statsRef, { 
+            likesCount: currentLikes + 1 
+          }, { merge: true });
         }
-
-        await setDoc(doc(db, 'likes', likeId), {
-          userId,
-          photoId,
-          createdAt: serverTimestamp()
-        });
-      }
+      });
     } catch (err: any) {
       console.error("Error toggling like:", err);
       if (err.message?.includes('permission-denied')) {
-        alert("Permission denied. Please ensure Firestore rules allow likes and Anonymous Auth is enabled in Firebase Console.");
-      } else {
-        alert("Failed to like photo. Check console for details.");
+        alert("Permission denied. Please ensure Firestore rules allow likes.");
       }
+    } finally {
+      // Small delay to prevent rapid spam clicking
+      setTimeout(() => {
+        setProcessingLikes(prev => ({ ...prev, [photoId]: false }));
+      }, 500);
     }
   };
 
@@ -982,14 +992,19 @@ export default function App() {
                   <div className="w-px h-3 bg-white/10 mx-2" />
                   <button
                     onClick={(e) => handleLike(currentPhoto.id, e)}
-                    className="flex items-center gap-2 group transition-all"
+                    disabled={processingLikes[currentPhoto.id]}
+                    className={cn(
+                      "flex items-center gap-2 group transition-all",
+                      processingLikes[currentPhoto.id] && "opacity-50 cursor-not-allowed"
+                    )}
                   >
                     <Heart 
                       className={cn(
                         "w-4 h-4 transition-all duration-300",
                         userLikes[currentPhoto.id] 
                           ? "fill-red-500 text-red-500 scale-110" 
-                          : "text-white/40 group-hover:text-red-400 group-hover:scale-110"
+                          : "text-white/40 group-hover:text-red-400 group-hover:scale-110",
+                        processingLikes[currentPhoto.id] && "animate-pulse"
                       )} 
                     />
                     <span className={cn(
