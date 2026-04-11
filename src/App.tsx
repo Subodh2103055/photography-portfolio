@@ -464,9 +464,6 @@ export default function App() {
       });
     } catch (err: any) {
       console.error("Error toggling like:", err);
-      if (err.message?.includes('permission-denied')) {
-        alert("Permission denied. Please ensure Firestore rules allow likes.");
-      }
     } finally {
       // Small delay to prevent rapid spam clicking
       setTimeout(() => {
