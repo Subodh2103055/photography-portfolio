@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+             request.auth.token.email == "nasirparvez2002@gmail.com" && 
+             request.auth.token.email_verified == true;
+    }
+
+    match /photo_stats/{photoId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /likes/{likeId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /photo_captions/{photoId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /photo_overrides/{photoId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}

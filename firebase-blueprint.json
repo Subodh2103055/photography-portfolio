@@ -1,0 +1,94 @@
+{
+  "entities": {
+    "PhotoStats": {
+      "title": "Photo Stats",
+      "description": "Statistics for a photo, such as like counts.",
+      "type": "object",
+      "properties": {
+        "likesCount": {
+          "type": "number",
+          "description": "Total number of likes for this photo."
+        }
+      },
+      "required": ["likesCount"]
+    },
+    "Like": {
+      "title": "Like",
+      "description": "A record of a user liking a photo.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user who liked the photo."
+        },
+        "photoId": {
+          "type": "string",
+          "description": "The ID of the photo that was liked."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the like was created."
+        }
+      },
+      "required": ["userId", "photoId", "createdAt"]
+    },
+    "PhotoCaption": {
+      "title": "Photo Caption",
+      "description": "A caption for a photo.",
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "The text of the caption."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the caption was last updated."
+        }
+      },
+      "required": ["text", "updatedAt"]
+    },
+    "PhotoOverride": {
+      "title": "Photo Override",
+      "description": "Manual category overrides for a photo.",
+      "type": "object",
+      "properties": {
+        "categories": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The manually selected categories."
+        },
+        "manuallyCategorized": {
+          "type": "boolean",
+          "description": "Flag indicating manual sorting."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the override was last updated."
+        }
+      },
+      "required": ["categories", "manuallyCategorized", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/photo_stats/{photoId}": {
+      "schema": "PhotoStats",
+      "description": "Stores aggregated stats for each photo."
+    },
+    "/likes/{likeId}": {
+      "schema": "Like",
+      "description": "Stores individual like records to prevent duplicate likes."
+    },
+    "/photo_captions/{photoId}": {
+      "schema": "PhotoCaption",
+      "description": "Stores captions for photos."
+    },
+    "/photo_overrides/{photoId}": {
+      "schema": "PhotoOverride",
+      "description": "Stores manual category overrides for photos."
+    }
+  }
+}
