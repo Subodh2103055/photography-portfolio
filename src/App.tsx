@@ -63,6 +63,10 @@ export default function App() {
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const [processingLikes, setProcessingLikes] = useState<Record<string, boolean>>({});
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Helper to make IDs safe for Firestore document paths (removes slashes)
+  const getSafeId = (id: string) => id.replace(/\//g, '___');
+  const getOriginalId = (safeId: string) => safeId.replace(/___/g, '/');
   
   // Pagination State
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -353,7 +357,7 @@ export default function App() {
     const unsubscribe = onSnapshot(collection(db, 'photo_stats'), (snapshot) => {
       const stats: Record<string, { likesCount: number }> = {};
       snapshot.forEach((doc) => {
-        stats[doc.id] = doc.data() as { likesCount: number };
+        stats[getOriginalId(doc.id)] = doc.data() as { likesCount: number };
       });
       setPhotoStats(stats);
     }, (error) => {
@@ -368,7 +372,7 @@ export default function App() {
     const unsubscribe = onSnapshot(collection(db, 'photo_captions'), (snapshot) => {
       const caps: Record<string, string> = {};
       snapshot.forEach((doc) => {
-        caps[doc.id] = (doc.data() as { text: string }).text;
+        caps[getOriginalId(doc.id)] = (doc.data() as { text: string }).text;
       });
       setCaptions(caps);
     }, (error) => {
@@ -383,7 +387,7 @@ export default function App() {
     const unsubscribe = onSnapshot(collection(db, 'photo_overrides'), (snapshot) => {
       const overrides: Record<string, { categories: string[], manuallyCategorized: boolean }> = {};
       snapshot.forEach((doc) => {
-        overrides[doc.id] = doc.data() as { categories: string[], manuallyCategorized: boolean };
+        overrides[getOriginalId(doc.id)] = doc.data() as { categories: string[], manuallyCategorized: boolean };
       });
       setPhotoOverrides(overrides);
     }, (error) => {
@@ -401,9 +405,10 @@ export default function App() {
         const userLikesUnsub = onSnapshot(collection(db, 'likes'), (snapshot) => {
           const likes: Record<string, boolean> = {};
           snapshot.forEach((doc) => {
+            // Document ID format: {userId}_{safePhotoId}
             if (doc.id.startsWith(user.uid + '_')) {
-              const photoId = doc.id.split('_')[1];
-              likes[photoId] = true;
+              const safePhotoId = doc.id.substring(user.uid.length + 1);
+              likes[getOriginalId(safePhotoId)] = true;
             }
           });
           setUserLikes(likes);
@@ -424,14 +429,15 @@ export default function App() {
     if (!auth.currentUser || processingLikes[photoId]) return;
 
     const userId = auth.currentUser.uid;
-    const likeId = `${userId}_${photoId}`;
+    const safePhotoId = getSafeId(photoId);
+    const likeId = `${userId}_${safePhotoId}`;
     
     setProcessingLikes(prev => ({ ...prev, [photoId]: true }));
 
     try {
       await runTransaction(db, async (transaction) => {
         const likeRef = doc(db, 'likes', likeId);
-        const statsRef = doc(db, 'photo_stats', photoId);
+        const statsRef = doc(db, 'photo_stats', safePhotoId);
         
         const likeDoc = await transaction.get(likeRef);
         const statsDoc = await transaction.get(statsRef);
@@ -448,7 +454,7 @@ export default function App() {
           // Like: Add the like record and increment count
           transaction.set(likeRef, {
             userId,
-            photoId,
+            photoId, // Store original ID inside
             createdAt: serverTimestamp()
           });
           transaction.set(statsRef, { 
@@ -470,8 +476,9 @@ export default function App() {
   };
 
   const handleSaveCaption = async (photoId: string) => {
+    const safePhotoId = getSafeId(photoId);
     try {
-      await setDoc(doc(db, 'photo_captions', photoId), {
+      await setDoc(doc(db, 'photo_captions', safePhotoId), {
         text: editingText,
         updatedAt: serverTimestamp()
       });
@@ -484,6 +491,7 @@ export default function App() {
   const handleToggleCategory = async (photoId: string, category: Category) => {
     if (!isAdmin) return;
     
+    const safePhotoId = getSafeId(photoId);
     const photo = mergedPhotos.find(p => p.id === photoId);
     if (!photo) return;
 
@@ -502,7 +510,7 @@ export default function App() {
     }
 
     try {
-      await setDoc(doc(db, 'photo_overrides', photoId), {
+      await setDoc(doc(db, 'photo_overrides', safePhotoId), {
         categories: newCategories,
         manuallyCategorized: true,
         updatedAt: serverTimestamp()

@@ -17,7 +17,8 @@ service cloud.firestore {
     }
 
     match /likes/{likeId} {
-      allow read, write: if isAuthenticated();
+      allow read: if true;
+      allow write: if isAuthenticated() && (likeId.startsWith(request.auth.uid + '_') || isAdmin());
     }
 
     match /photo_captions/{photoId} {
@@ -26,6 +27,12 @@ service cloud.firestore {
     }
 
     match /photo_overrides/{photoId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Allow recursive matches for subcollections just in case
+    match /{path=**} {
       allow read: if true;
       allow write: if isAdmin();
     }
