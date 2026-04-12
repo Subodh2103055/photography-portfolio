@@ -314,8 +314,12 @@ export default function App() {
       try {
         const response = await fetch('/api/photos/stats');
         if (response.ok) {
-          const data = await response.json();
-          setTotalPhotoCount(data.totalCount);
+          try {
+            const data = await response.json();
+            setTotalPhotoCount(data.totalCount);
+          } catch (e) {
+            console.error('Error parsing stats JSON:', e);
+          }
         }
       } catch (err) {
         console.error('Error fetching stats:', err);
@@ -326,10 +330,18 @@ export default function App() {
       try {
         const response = await fetch('/api/photos?limit=50');
         if (!response.ok) {
-          const errorData = await response.json();
-          const message = typeof errorData.details === 'string' 
-            ? errorData.details 
-            : (typeof errorData.error === 'string' ? errorData.error : (errorData.error?.message || 'Failed to fetch'));
+          let message = 'Failed to fetch photos';
+          try {
+            const errorData = await response.json();
+            message = typeof errorData.details === 'string' 
+              ? errorData.details 
+              : (typeof errorData.error === 'string' ? errorData.error : (errorData.error?.message || message));
+          } catch (e) {
+            // If not JSON, get the status text or a snippet of the body
+            const text = await response.text();
+            console.error("Non-JSON Error Response:", text);
+            message = `Server error ${response.status}: ${response.statusText || 'Check configuration'}`;
+          }
           throw new Error(message);
         }
         const data = await response.json();
@@ -354,6 +366,7 @@ export default function App() {
 
   // Listen to Photo Stats
   useEffect(() => {
+    if (!db || !db.type && Object.keys(db).length === 0) return;
     const unsubscribe = onSnapshot(collection(db, 'photo_stats'), (snapshot) => {
       const stats: Record<string, { likesCount: number }> = {};
       snapshot.forEach((doc) => {
@@ -369,6 +382,7 @@ export default function App() {
 
   // Listen to Photo Captions
   useEffect(() => {
+    if (!db || !db.type && Object.keys(db).length === 0) return;
     const unsubscribe = onSnapshot(collection(db, 'photo_captions'), (snapshot) => {
       const caps: Record<string, string> = {};
       snapshot.forEach((doc) => {
@@ -384,6 +398,7 @@ export default function App() {
 
   // Listen to Photo Overrides
   useEffect(() => {
+    if (!db || !db.type && Object.keys(db).length === 0) return;
     const unsubscribe = onSnapshot(collection(db, 'photo_overrides'), (snapshot) => {
       const overrides: Record<string, { categories: string[], manuallyCategorized: boolean }> = {};
       snapshot.forEach((doc) => {
@@ -399,8 +414,9 @@ export default function App() {
 
   // Listen to User Likes
   useEffect(() => {
+    if (!auth || !auth.onAuthStateChanged) return;
     const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (user) {
+      if (user && db && (db.type || Object.keys(db).length > 0)) {
         console.log("Firebase Auth: User is signed in", user.uid, user.isAnonymous ? "(Anonymous)" : "");
         const userLikesUnsub = onSnapshot(collection(db, 'likes'), (snapshot) => {
           const likes: Record<string, boolean> = {};

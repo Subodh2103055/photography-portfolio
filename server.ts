@@ -6,15 +6,9 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-console.log('Environment variables check:');
-console.log('CLOUDINARY_CLOUD_NAME:', process.env.CLOUDINARY_CLOUD_NAME ? 'SET' : 'MISSING');
-console.log('CLOUDINARY_API_KEY:', process.env.CLOUDINARY_API_KEY ? 'SET' : 'MISSING');
-console.log('CLOUDINARY_API_SECRET:', process.env.CLOUDINARY_API_SECRET ? 'SET' : 'MISSING');
+const app = express();
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
-
+async function setupServer() {
   // API Route to fetch photos from Cloudinary with pagination
   app.get('/api/photos', async (req, res) => {
     const cloudName = (process.env.CLOUDINARY_CLOUD_NAME || '').trim();
@@ -23,7 +17,6 @@ async function startServer() {
     const cursor = req.query.cursor as string;
     const limit = parseInt(req.query.limit as string) || 50;
 
-    // Check if credentials are set
     if (!cloudName || !apiKey || !apiSecret) {
       return res.status(500).json({ 
         error: 'Cloudinary configuration missing',
@@ -31,7 +24,6 @@ async function startServer() {
       });
     }
 
-    // Configure Cloudinary for this request
     cloudinary.config({
       cloud_name: cloudName,
       api_key: apiKey,
@@ -71,7 +63,6 @@ async function startServer() {
     }
   });
 
-  // API Route to get total photo count
   app.get('/api/photos/stats', async (req, res) => {
     const cloudName = (process.env.CLOUDINARY_CLOUD_NAME || '').trim();
     const apiKey = (process.env.CLOUDINARY_API_KEY || '').trim();
@@ -100,41 +91,44 @@ async function startServer() {
     }
   });
 
-  // API Route to update tags for a specific photo
   app.post('/api/admin/update-tag', express.json(), async (req, res) => {
     const { publicId, tag } = req.body;
-    
-    if (!publicId || !tag) {
-      return res.status(400).json({ error: 'Missing publicId or tag' });
-    }
+    if (!publicId || !tag) return res.status(400).json({ error: 'Missing publicId or tag' });
 
     try {
-      // Replace all existing tags with the new one
       const result = await cloudinary.uploader.replace_tag(tag, [publicId]);
       res.json({ success: true, result });
     } catch (error: any) {
-      console.error('Error updating tag in Cloudinary:', error);
       res.status(500).json({ error: 'Failed to update tag', details: error.message });
     }
   });
 
-  if (process.env.NODE_ENV !== 'production') {
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
+    // In production (including Vercel), serve static files
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    // SPA fallback - only if not an API route
+    app.get(/^(?!\/api).*/, (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  // Only listen if not running as a serverless function
+  if (!process.env.VERCEL) {
+    const PORT = 3000;
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }
 }
 
-startServer();
+setupServer();
+
+export default app;
