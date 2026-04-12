@@ -371,6 +371,23 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
 
+  useEffect(() => {
+    if (!db || !db.type) return;
+    
+    const testConnection = async () => {
+      try {
+        // Try to read a dummy doc to verify connection
+        await getDoc(doc(db, '_connection_test', 'ping'));
+        console.log("Firestore connection verified.");
+      } catch (err: any) {
+        if (err.message?.includes("offline")) {
+          console.error("Firestore is offline. Check your internet or Firebase config.");
+        }
+      }
+    };
+    testConnection();
+  }, [db]);
+
   // Consolidated Auth & User Likes Listener
   useEffect(() => {
     if (!auth || !auth.onAuthStateChanged) return;
@@ -521,10 +538,12 @@ export default function App() {
       console.error("[LikeAction] Error:", err);
       // Revert optimistic update
       setUserLikes(prev => ({ ...prev, [photoId]: isCurrentlyLiked }));
-      // The stats listener will eventually correct the count from server
       
-      if (err.message?.includes("permission-denied")) {
-        alert("Permission denied. Please make sure you are logged in correctly.");
+      const errorMsg = err.message || "Unknown error";
+      if (errorMsg.includes("permission-denied")) {
+        alert("Permission denied by database. This usually happens if the folder path is complex or rules are not deployed. Nasir, please check your Firestore rules.");
+      } else {
+        alert("Error saving your Love: " + errorMsg);
       }
     } finally {
       setTimeout(() => {
@@ -1249,7 +1268,7 @@ export default function App() {
                 <div className="mb-4 p-2 bg-white/5 rounded text-[10px] font-mono text-gray-500">
                   <p>User: {user?.uid || 'None'}</p>
                   <p>Auth Ready: {isAuthReady ? 'Yes' : 'No'}</p>
-                  <p>DB Ready: {!!db.type ? 'Yes' : 'No'}</p>
+                  <p>DB ID: {import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)'}</p>
                 </div>
                 <p className="text-xs text-gray-400 mb-6 leading-relaxed">
                   Upload your photos to Cloudinary, then click below. Gemini will analyze your images and automatically sort them into categories.
