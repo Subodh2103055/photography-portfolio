@@ -505,7 +505,7 @@ export default function App() {
         const serverLikesCount = statsDoc.exists() ? (statsDoc.data().likesCount || 0) : 0;
         const serverIsLiked = likeDoc.exists();
 
-        console.log(`Server state for ${photoId}: Count=${serverLikesCount}, IsLiked=${serverIsLiked}`);
+        console.log(`[Transaction] ${photoId}: ServerCount=${serverLikesCount}, ServerIsLiked=${serverIsLiked}`);
 
         if (serverIsLiked) {
           // Unlike: Remove the like record and decrement count
@@ -513,26 +513,35 @@ export default function App() {
           transaction.set(statsRef, { 
             likesCount: Math.max(0, serverLikesCount - 1) 
           }, { merge: true });
-          console.log("Transaction: Removing like");
         } else {
           // Like: Add the like record and increment count
           transaction.set(likeRef, {
             userId,
-            photoId,
+            photoId, // Original ID
             createdAt: serverTimestamp()
           });
           transaction.set(statsRef, { 
             likesCount: serverLikesCount + 1 
           }, { merge: true });
-          console.log("Transaction: Adding like");
         }
       });
-      console.log("Transaction completed successfully");
+      console.log(`[Transaction] Success for ${photoId}`);
     } catch (err: any) {
       console.error("Error toggling like:", err);
-      // Revert optimistic update on error
+      // Revert ALL optimistic updates on error
       setUserLikes(prev => ({ ...prev, [photoId]: isCurrentlyLiked }));
-      // Note: stats will be corrected by the server listener
+      setPhotoStats(prev => {
+        const current = prev[photoId] || { likesCount: 0 };
+        return {
+          ...prev,
+          [photoId]: { likesCount: isCurrentlyLiked ? current.likesCount + 1 : Math.max(0, current.likesCount - 1) }
+        };
+      });
+      
+      const errorMsg = err.message || "Unknown error";
+      if (errorMsg.includes("permission-denied")) {
+        console.error("Permission Denied: Check if Anonymous Auth is enabled and Firestore rules are deployed.");
+      }
     } finally {
       // Mandatory delay to prevent rapid spam clicking
       setTimeout(() => {
