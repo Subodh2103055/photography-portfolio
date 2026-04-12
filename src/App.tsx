@@ -16,6 +16,7 @@ import {
   onSnapshot, 
   collection, 
   query, 
+  where,
   orderBy, 
   limit, 
   serverTimestamp,
@@ -364,6 +365,49 @@ export default function App() {
     fetchPhotos();
   }, []);
 
+  const [user, setUser] = useState<any>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+
+  // Consolidated Auth & User Likes Listener
+  useEffect(() => {
+    if (!auth || !auth.onAuthStateChanged) return;
+    
+    const unsubscribeAuth = auth.onAuthStateChanged((u: any) => {
+      console.log("Auth state changed. User:", u?.uid || "Logged out");
+      setUser(u);
+      setIsAuthReady(true);
+    });
+
+    return () => unsubscribeAuth();
+  }, []);
+
+  // Listen to User's specific likes
+  useEffect(() => {
+    if (!user || !db || (!db.type && Object.keys(db).length === 0)) {
+      setUserLikes({});
+      return;
+    }
+
+    // Query only likes for the current user
+    const likesQuery = query(collection(db, 'likes'), where('userId', '==', user.uid));
+    
+    const unsubscribeLikes = onSnapshot(likesQuery, (snapshot) => {
+      const likes: Record<string, boolean> = {};
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.photoId) {
+          likes[data.photoId] = true;
+        }
+      });
+      console.log("Updated user likes:", Object.keys(likes).length);
+      setUserLikes(likes);
+    }, (error) => {
+      console.error("Firestore User Likes Listener Error:", error);
+    });
+
+    return () => unsubscribeLikes();
+  }, [user]);
+
   // Listen to Photo Stats
   useEffect(() => {
     if (!db || !db.type && Object.keys(db).length === 0) return;
@@ -412,42 +456,25 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Listen to User Likes
-  useEffect(() => {
-    if (!auth || !auth.onAuthStateChanged) return;
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (user && db && (db.type || Object.keys(db).length > 0)) {
-        console.log("Firebase Auth: User is signed in", user.uid, user.isAnonymous ? "(Anonymous)" : "");
-        const userLikesUnsub = onSnapshot(collection(db, 'likes'), (snapshot) => {
-          const likes: Record<string, boolean> = {};
-          snapshot.forEach((doc) => {
-            // Document ID format: {userId}_{safePhotoId}
-            if (doc.id.startsWith(user.uid + '_')) {
-              const safePhotoId = doc.id.substring(user.uid.length + 1);
-              likes[getOriginalId(safePhotoId)] = true;
-            }
-          });
-          setUserLikes(likes);
-        }, (error) => {
-          console.error("Firestore Likes Listener Error:", error);
-        });
-        return () => userLikesUnsub();
-      } else {
-        console.log("Firebase Auth: No user signed in");
-      }
-    });
-
-    return () => unsubscribe();
-  }, []);
-
   const handleLike = async (photoId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!auth.currentUser || processingLikes[photoId]) return;
+    if (!user || processingLikes[photoId]) return;
 
-    const userId = auth.currentUser.uid;
+    const userId = user.uid;
     const safePhotoId = getSafeId(photoId);
     const likeId = `${userId}_${safePhotoId}`;
+    const isCurrentlyLiked = !!userLikes[photoId];
     
+    // Optimistic UI update
+    setUserLikes(prev => ({ ...prev, [photoId]: !isCurrentlyLiked }));
+    setPhotoStats(prev => {
+      const current = prev[photoId] || { likesCount: 0 };
+      return {
+        ...prev,
+        [photoId]: { likesCount: Math.max(0, current.likesCount + (isCurrentlyLiked ? -1 : 1)) }
+      };
+    });
+
     setProcessingLikes(prev => ({ ...prev, [photoId]: true }));
 
     try {
@@ -480,11 +507,14 @@ export default function App() {
       });
     } catch (err: any) {
       console.error("Error toggling like:", err);
+      // Revert optimistic update on error
+      setUserLikes(prev => ({ ...prev, [photoId]: isCurrentlyLiked }));
+      // The stats listener will eventually correct the count
     } finally {
-      // Small delay to prevent rapid spam clicking
+      // Mandatory delay to prevent rapid spam clicking
       setTimeout(() => {
         setProcessingLikes(prev => ({ ...prev, [photoId]: false }));
-      }, 500);
+      }, 1000);
     }
   };
 
@@ -538,7 +568,7 @@ export default function App() {
     return bengaliRegex.test(text);
   };
 
-  const isAdmin = auth.currentUser?.email === 'nasirparvez2002@gmail.com';
+  const isAdmin = user?.email === 'nasirparvez2002@gmail.com';
 
   const mergedPhotos = useMemo(() => {
     return photos.map(photo => {
@@ -1180,8 +1210,8 @@ export default function App() {
                 <Wand2 className="w-4 h-4 text-[#5f8d8d]" />
                 AI Gallery Assistant
               </div>
-              {auth.currentUser?.email && (
-                <span className="text-[8px] text-gray-500 lowercase">{auth.currentUser.email}</span>
+              {user?.email && (
+                <span className="text-[8px] text-gray-500 lowercase">{user.email}</span>
               )}
             </h3>
             
@@ -1200,6 +1230,11 @@ export default function App() {
               </div>
             ) : (
               <>
+                <div className="mb-4 p-2 bg-white/5 rounded text-[10px] font-mono text-gray-500">
+                  <p>User: {user?.uid || 'None'}</p>
+                  <p>Auth Ready: {isAuthReady ? 'Yes' : 'No'}</p>
+                  <p>DB Ready: {!!db.type ? 'Yes' : 'No'}</p>
+                </div>
                 <p className="text-xs text-gray-400 mb-6 leading-relaxed">
                   Upload your photos to Cloudinary, then click below. Gemini will analyze your images and automatically sort them into categories.
                 </p>

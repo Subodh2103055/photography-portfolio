@@ -20,15 +20,26 @@ let db: any;
 let googleProvider: any;
 
 if (isFirebaseConfigured) {
-  app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app, import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID);
-  googleProvider = new GoogleAuthProvider();
+  try {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app, import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID);
+    googleProvider = new GoogleAuthProvider();
 
-  // Sign in anonymously to allow likes without forced login
-  signInAnonymously(auth).catch((error) => {
-    console.error("Error signing in anonymously:", error);
-  });
+    console.log("Firebase initialized successfully with project:", firebaseConfig.projectId);
+
+    // Sign in anonymously to allow likes without forced login
+    signInAnonymously(auth).then(() => {
+      console.log("Signed in anonymously as:", auth.currentUser?.uid);
+    }).catch((error) => {
+      console.error("Error signing in anonymously. Make sure 'Anonymous' is enabled in Firebase Console > Authentication > Sign-in method.", error);
+    });
+  } catch (error) {
+    console.error("Error initializing Firebase:", error);
+    auth = { onAuthStateChanged: () => () => {} };
+    db = {};
+    googleProvider = {};
+  }
 } else {
   console.warn("Firebase environment variables are missing. Some features may not work.");
   // Provide mock/null objects to prevent crashes in components
