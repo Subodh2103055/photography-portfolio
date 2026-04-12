@@ -464,6 +464,7 @@ export default function App() {
     
     if (!user) {
       console.warn("Cannot like: User not authenticated");
+      alert("Authentication is still setting up. Please wait a moment and try again. If this persists, Anonymous Auth might not be enabled in the Firebase Console.");
       return;
     }
 
