@@ -17,17 +17,16 @@ service cloud.firestore {
 
     match /photo_stats/{photoId} {
       allow read: if true;
-      // Allow authenticated users to update stats (increment/decrement)
       allow write: if isAuthenticated();
     }
 
     match /likes/{likeId} {
       allow read: if true;
-      // Allow users to manage their own likes. 
-      // We check that the document ID starts with their UID.
-      allow write: if isAuthenticated() && 
-                   likeId.startsWith(request.auth.uid + '_') &&
-                   (request.method == 'DELETE' || request.resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && 
+                    likeId.startsWith(request.auth.uid + '_') &&
+                    request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && 
+                    likeId.startsWith(request.auth.uid + '_');
     }
 
     match /photo_captions/{photoId} {

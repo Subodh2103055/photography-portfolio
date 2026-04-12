@@ -5,7 +5,7 @@ import { Category, Photo } from './types';
 import { cn } from './lib/utils';
 import { Camera, Instagram, Mail, Facebook, Globe, Loader2, ChevronDown, Wand2, CheckCircle2, AlertCircle, Heart, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
-import { db, auth, googleProvider } from './firebase';
+import { db, auth, googleProvider, databaseId } from './firebase';
 import { signInWithPopup } from 'firebase/auth';
 import { 
   doc, 
@@ -1268,7 +1268,7 @@ export default function App() {
                 <div className="mb-4 p-2 bg-white/5 rounded text-[10px] font-mono text-gray-500">
                   <p>User: {user?.uid || 'None'}</p>
                   <p>Auth Ready: {isAuthReady ? 'Yes' : 'No'}</p>
-                  <p>DB ID: {import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)'}</p>
+                  <p>DB ID: {databaseId || '(default)'}</p>
                 </div>
                 <p className="text-xs text-gray-400 mb-6 leading-relaxed">
                   Upload your photos to Cloudinary, then click below. Gemini will analyze your images and automatically sort them into categories.
