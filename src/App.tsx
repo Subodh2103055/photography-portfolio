@@ -477,7 +477,7 @@ export default function App() {
     const likeId = `${userId}_${safePhotoId}`;
     const isCurrentlyLiked = !!userLikes[photoId];
     
-    console.log(`Toggling like for ${photoId}. Current state: ${isCurrentlyLiked ? 'Liked' : 'Not Liked'}`);
+    console.log(`[LikeAction] ${photoId} | User: ${userId} | CurrentlyLiked: ${isCurrentlyLiked}`);
 
     // Set processing state
     likesInProgress.current[photoId] = true;
@@ -487,67 +487,49 @@ export default function App() {
     setUserLikes(prev => ({ ...prev, [photoId]: !isCurrentlyLiked }));
     setPhotoStats(prev => {
       const current = prev[photoId] || { likesCount: 0 };
-      const newCount = Math.max(0, current.likesCount + (isCurrentlyLiked ? -1 : 1));
       return {
         ...prev,
-        [photoId]: { likesCount: newCount }
+        [photoId]: { likesCount: Math.max(0, current.likesCount + (isCurrentlyLiked ? -1 : 1)) }
       };
     });
 
     try {
-      await runTransaction(db, async (transaction) => {
-        const likeRef = doc(db, 'likes', likeId);
-        const statsRef = doc(db, 'photo_stats', safePhotoId);
-        
-        const likeDoc = await transaction.get(likeRef);
-        const statsDoc = await transaction.get(statsRef);
-        
-        const serverLikesCount = statsDoc.exists() ? (statsDoc.data().likesCount || 0) : 0;
-        const serverIsLiked = likeDoc.exists();
+      const likeRef = doc(db, 'likes', likeId);
+      const statsRef = doc(db, 'photo_stats', safePhotoId);
 
-        console.log(`[Transaction] ${photoId}: ServerCount=${serverLikesCount}, ServerIsLiked=${serverIsLiked}`);
-
-        if (serverIsLiked) {
-          // Unlike: Remove the like record and decrement count
-          transaction.delete(likeRef);
-          transaction.set(statsRef, { 
-            likesCount: Math.max(0, serverLikesCount - 1) 
-          }, { merge: true });
-        } else {
-          // Like: Add the like record and increment count
-          transaction.set(likeRef, {
-            userId,
-            photoId, // Original ID
-            createdAt: serverTimestamp()
-          });
-          transaction.set(statsRef, { 
-            likesCount: serverLikesCount + 1 
-          }, { merge: true });
-        }
-      });
-      console.log(`[Transaction] Success for ${photoId}`);
+      if (isCurrentlyLiked) {
+        // Unlike
+        await deleteDoc(likeRef);
+        await setDoc(statsRef, { 
+          likesCount: increment(-1) 
+        }, { merge: true });
+        console.log(`[LikeAction] Successfully Unliked ${photoId}`);
+      } else {
+        // Like
+        await setDoc(likeRef, {
+          userId,
+          photoId,
+          createdAt: serverTimestamp()
+        });
+        await setDoc(statsRef, { 
+          likesCount: increment(1) 
+        }, { merge: true });
+        console.log(`[LikeAction] Successfully Liked ${photoId}`);
+      }
     } catch (err: any) {
-      console.error("Error toggling like:", err);
-      // Revert ALL optimistic updates on error
+      console.error("[LikeAction] Error:", err);
+      // Revert optimistic update
       setUserLikes(prev => ({ ...prev, [photoId]: isCurrentlyLiked }));
-      setPhotoStats(prev => {
-        const current = prev[photoId] || { likesCount: 0 };
-        return {
-          ...prev,
-          [photoId]: { likesCount: isCurrentlyLiked ? current.likesCount + 1 : Math.max(0, current.likesCount - 1) }
-        };
-      });
+      // The stats listener will eventually correct the count from server
       
-      const errorMsg = err.message || "Unknown error";
-      if (errorMsg.includes("permission-denied")) {
-        console.error("Permission Denied: Check if Anonymous Auth is enabled and Firestore rules are deployed.");
+      if (err.message?.includes("permission-denied")) {
+        alert("Permission denied. Please make sure you are logged in correctly.");
       }
     } finally {
-      // Mandatory delay to prevent rapid spam clicking
       setTimeout(() => {
         likesInProgress.current[photoId] = false;
         setProcessingLikes(prev => ({ ...prev, [photoId]: false }));
-      }, 1500); // Increased delay to 1.5s for safety
+      }, 800);
     }
   };
 

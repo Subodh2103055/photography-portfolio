@@ -17,14 +17,24 @@ service cloud.firestore {
 
     match /photo_stats/{photoId} {
       allow read: if true;
-      // Allow authenticated users to update stats
-      allow write: if isAuthenticated();
+      // Only allow increment/decrement of 1, and only if authenticated
+      allow write: if isAuthenticated() && 
+                   (
+                     !exists(/databases/$(database)/documents/photo_stats/$(photoId)) ||
+                     (
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount']) &&
+                       (request.resource.data.likesCount == resource.data.likesCount + 1 || 
+                        request.resource.data.likesCount == resource.data.likesCount - 1)
+                     )
+                   );
     }
 
     match /likes/{likeId} {
       allow read: if true;
       // Allow users to manage their own likes
-      allow write: if isAuthenticated() && (likeId.startsWith(request.auth.uid + '_') || isAdmin());
+      allow write: if isAuthenticated() && 
+                   (likeId == request.auth.uid + '_' + request.resource.data.photoId.replace('/', '___')) &&
+                   (likeId.startsWith(request.auth.uid + '_') || isAdmin());
     }
 
     match /photo_captions/{photoId} {
