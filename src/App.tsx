@@ -223,12 +223,12 @@ export default function App() {
         Return ONLY the category name. If none fit perfectly, return 'Uncategorized'.`;
 
         const result = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
+          model: "gemini-1.5-flash",
           contents: [{ parts: [{ inlineData: { mimeType: blob.type, data: base64Data } }, { text: prompt }] }]
         });
 
-        const suggestedTag = result.text?.trim() || 'Uncategorized';
-        const finalTag = CATEGORIES.includes(suggestedTag as Category) ? suggestedTag : 'Uncategorized';
+        const suggestedTag = result.text?.trim().replace(/\.$/, '') || 'Uncategorized';
+        const finalTag = CATEGORIES.find(c => c.toLowerCase() === suggestedTag.toLowerCase()) || 'Uncategorized';
 
         // 3. Update backend
         await fetch('/api/admin/update-tag', {
@@ -269,31 +269,61 @@ export default function App() {
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [isAutoTagging, taggingSession, photos, ai, CATEGORIES]);
+  }, [isAutoTagging, taggingSession, photos, ai, CATEGORIES, photoOverrides]);
 
-  const handleStartAutoTag = () => {
-    const photosToTag = mergedPhotos.filter(p => {
-      const isUncategorized = p.categories.includes('Uncategorized') || p.categories.length === 0;
-      const isManuallyCategorized = photoOverrides[p.id]?.manuallyCategorized;
-      return isUncategorized && !isManuallyCategorized;
-    });
-    
-    if (photosToTag.length === 0) {
-      alert('All photos are already categorized or manually sorted!');
-      return;
+  const handleStartAutoTag = async () => {
+    setIsLoading(true);
+    try {
+      // Fetch a fresh batch of 100 photos to find uncategorized ones
+      const response = await fetch('/api/photos?limit=100');
+      if (!response.ok) throw new Error("Failed to fetch photos from server");
+      
+      const data = await response.json();
+      const freshPhotos = data.photos || [];
+      
+      // Update local state with fresh photos
+      setPhotos(freshPhotos);
+      setNextCursor(data.nextCursor);
+
+      const getUncategorized = (items: Photo[]) => items.filter(p => {
+        const override = photoOverrides[p.id];
+        const isManuallyCategorized = override?.manuallyCategorized;
+        
+        // A photo needs tagging if it's not manually sorted AND:
+        // 1. It has no override and the original categories are empty/uncategorized
+        // 2. OR it has an override but the override categories are empty/uncategorized
+        const originalIsUncategorized = p.categories.length === 0 || p.categories.includes('Uncategorized');
+        const overrideIsUncategorized = !override || override.categories.length === 0 || (override.categories.length === 1 && override.categories[0] === 'Uncategorized');
+        
+        const needsTagging = !isManuallyCategorized && (override ? overrideIsUncategorized : originalIsUncategorized);
+        return needsTagging;
+      });
+
+      const photosToTag = getUncategorized(freshPhotos);
+      console.log(`[AutoTag] Found ${photosToTag.length} uncategorized photos out of ${freshPhotos.length} fetched.`);
+      
+      if (photosToTag.length === 0) {
+        alert('No uncategorized photos found in the first 100 images. If you have more photos, please scroll down to load them, then try again.');
+        return;
+      }
+
+      const newSession = {
+        ids: photosToTag.map(p => p.id),
+        current: 0,
+        total: photosToTag.length,
+        lastTag: ''
+      };
+
+      setTaggingSession(newSession);
+      setTaggingProgress({ current: 0, total: newSession.total, lastTag: '' });
+      localStorage.setItem('ai_tagging_session', JSON.stringify(newSession));
+      setIsAutoTagging(true);
+    } catch (err) {
+      console.error("Error starting auto-tagging:", err);
+      alert("Error starting auto-tagging. Please check your connection.");
+    } finally {
+      setIsLoading(false);
     }
-
-    const newSession = {
-      ids: photosToTag.map(p => p.id),
-      current: 0,
-      total: photosToTag.length,
-      lastTag: ''
-    };
-
-    setTaggingSession(newSession);
-    setTaggingProgress({ current: 0, total: newSession.total, lastTag: '' });
-    localStorage.setItem('ai_tagging_session', JSON.stringify(newSession));
-    setIsAutoTagging(true);
   };
 
   const handleResumeAutoTag = () => {
@@ -517,33 +547,37 @@ export default function App() {
 
       if (isCurrentlyLiked) {
         // Unlike
+        console.log(`[LikeAction] Attempting to Delete Like: ${likeId}`);
         await deleteDoc(likeRef);
+        console.log(`[LikeAction] Attempting to Decrement Stats: ${safePhotoId}`);
         await setDoc(statsRef, { 
           likesCount: increment(-1) 
         }, { merge: true });
         console.log(`[LikeAction] Successfully Unliked ${photoId}`);
       } else {
         // Like
+        console.log(`[LikeAction] Attempting to Create Like: ${likeId}`);
         await setDoc(likeRef, {
           userId,
           photoId,
           createdAt: serverTimestamp()
         });
+        console.log(`[LikeAction] Attempting to Increment Stats: ${safePhotoId}`);
         await setDoc(statsRef, { 
           likesCount: increment(1) 
         }, { merge: true });
         console.log(`[LikeAction] Successfully Liked ${photoId}`);
       }
     } catch (err: any) {
-      console.error("[LikeAction] Error:", err);
+      console.error("[LikeAction] Detailed Error:", err);
       // Revert optimistic update
       setUserLikes(prev => ({ ...prev, [photoId]: isCurrentlyLiked }));
       
-      const errorMsg = err.message || "Unknown error";
-      if (errorMsg.includes("permission-denied")) {
-        alert("Permission denied by database. This usually happens if the folder path is complex or rules are not deployed. Nasir, please check your Firestore rules.");
+      const errorMsg = err?.message || String(err);
+      if (errorMsg.includes('permission-denied') || errorMsg.includes('Missing or insufficient permissions')) {
+        alert(`Permission Denied! \n\nThis usually means the database is not allowing the write. \n\nUser ID: ${userId}\nPhoto ID: ${safePhotoId}\n\nI have updated the security rules, please wait a moment and try again.`);
       } else {
-        alert("Error saving your Love: " + errorMsg);
+        alert(`Error saving your Love: ${errorMsg}`);
       }
     } finally {
       setTimeout(() => {
@@ -770,7 +804,7 @@ export default function App() {
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto px-6 py-12">
+      <main className="max-w-7xl mx-auto px-6 pt-4 pb-12">
         <AnimatePresence mode="wait">
           {view === 'gallery' ? (
             <motion.div
@@ -781,11 +815,11 @@ export default function App() {
               transition={{ duration: 0.5 }}
             >
               {activeCategory === 'All' ? (
-                <div className="space-y-20">
+                <div className="space-y-12">
                   {/* Hero Section with Counter */}
-                  <section className="py-12 flex flex-col items-center gap-8">
+                  <section className="pt-4 pb-8 flex flex-col items-center gap-8">
                     <div className="text-center">
-                      <h1 className="text-5xl md:text-7xl font-light tracking-tighter text-white mb-10">
+                      <h1 className="text-5xl md:text-7xl font-light tracking-tighter text-white mb-6">
                         The World Through <br />
                         <span className="text-[#5f8d8d] italic">My Lens</span>
                       </h1>
@@ -802,10 +836,10 @@ export default function App() {
 
                   {/* Featured Section */}
                   <section>
-                    <div className="text-center mb-12">
+                    <div className="text-center mb-8">
                       <span className="text-[10px] uppercase tracking-[0.4em] text-gray-500 mb-2 block italic">Curated by the community</span>
                       <h2 className="text-4xl font-light tracking-tight text-white">Through Others' Eyes</h2>
-                      <div className="w-24 h-px bg-[#5f8d8d] mx-auto mt-6 opacity-50" />
+                      <div className="w-24 h-px bg-[#5f8d8d] mx-auto mt-4 opacity-50" />
                     </div>
 
                     {isLoading ? (
