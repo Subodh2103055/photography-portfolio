@@ -99,6 +99,9 @@ export default function App() {
     lastTag: string;
   } | null>(null);
 
+  // Use a ref to track likes in progress to avoid race conditions
+  const likesInProgress = useRef<Record<string, boolean>>({});
+
   // Infinite Scroll State
   const [visibleCount, setVisibleCount] = useState(24);
   const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -458,24 +461,38 @@ export default function App() {
 
   const handleLike = async (photoId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!user || processingLikes[photoId]) return;
+    
+    if (!user) {
+      console.warn("Cannot like: User not authenticated");
+      return;
+    }
+
+    if (likesInProgress.current[photoId]) {
+      console.log("Like already in progress for:", photoId);
+      return;
+    }
 
     const userId = user.uid;
     const safePhotoId = getSafeId(photoId);
     const likeId = `${userId}_${safePhotoId}`;
     const isCurrentlyLiked = !!userLikes[photoId];
     
+    console.log(`Toggling like for ${photoId}. Current state: ${isCurrentlyLiked ? 'Liked' : 'Not Liked'}`);
+
+    // Set processing state
+    likesInProgress.current[photoId] = true;
+    setProcessingLikes(prev => ({ ...prev, [photoId]: true }));
+
     // Optimistic UI update
     setUserLikes(prev => ({ ...prev, [photoId]: !isCurrentlyLiked }));
     setPhotoStats(prev => {
       const current = prev[photoId] || { likesCount: 0 };
+      const newCount = Math.max(0, current.likesCount + (isCurrentlyLiked ? -1 : 1));
       return {
         ...prev,
-        [photoId]: { likesCount: Math.max(0, current.likesCount + (isCurrentlyLiked ? -1 : 1)) }
+        [photoId]: { likesCount: newCount }
       };
     });
-
-    setProcessingLikes(prev => ({ ...prev, [photoId]: true }));
 
     try {
       await runTransaction(db, async (transaction) => {
@@ -485,36 +502,43 @@ export default function App() {
         const likeDoc = await transaction.get(likeRef);
         const statsDoc = await transaction.get(statsRef);
         
-        const currentLikes = statsDoc.exists() ? (statsDoc.data().likesCount || 0) : 0;
+        const serverLikesCount = statsDoc.exists() ? (statsDoc.data().likesCount || 0) : 0;
+        const serverIsLiked = likeDoc.exists();
 
-        if (likeDoc.exists()) {
+        console.log(`Server state for ${photoId}: Count=${serverLikesCount}, IsLiked=${serverIsLiked}`);
+
+        if (serverIsLiked) {
           // Unlike: Remove the like record and decrement count
           transaction.delete(likeRef);
           transaction.set(statsRef, { 
-            likesCount: Math.max(0, currentLikes - 1) 
+            likesCount: Math.max(0, serverLikesCount - 1) 
           }, { merge: true });
+          console.log("Transaction: Removing like");
         } else {
           // Like: Add the like record and increment count
           transaction.set(likeRef, {
             userId,
-            photoId, // Store original ID inside
+            photoId,
             createdAt: serverTimestamp()
           });
           transaction.set(statsRef, { 
-            likesCount: currentLikes + 1 
+            likesCount: serverLikesCount + 1 
           }, { merge: true });
+          console.log("Transaction: Adding like");
         }
       });
+      console.log("Transaction completed successfully");
     } catch (err: any) {
       console.error("Error toggling like:", err);
       // Revert optimistic update on error
       setUserLikes(prev => ({ ...prev, [photoId]: isCurrentlyLiked }));
-      // The stats listener will eventually correct the count
+      // Note: stats will be corrected by the server listener
     } finally {
       // Mandatory delay to prevent rapid spam clicking
       setTimeout(() => {
+        likesInProgress.current[photoId] = false;
         setProcessingLikes(prev => ({ ...prev, [photoId]: false }));
-      }, 1000);
+      }, 1500); // Increased delay to 1.5s for safety
     }
   };
 
