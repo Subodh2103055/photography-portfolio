@@ -861,16 +861,6 @@ export default function App() {
             </button>
             <button 
               onClick={() => {
-                setView('gallery');
-                setActiveCategory('Full Gallery');
-                setIsCategoryOpen(false);
-              }}
-              className={cn("hover:text-[#5f8d8d] transition-colors", view === 'gallery' && activeCategory === 'Full Gallery' && "text-[#5f8d8d]")}
-            >
-              Gallery
-            </button>
-            <button 
-              onClick={() => {
                 setView('about');
                 setIsCategoryOpen(false);
               }}
@@ -911,6 +901,19 @@ export default function App() {
                     className="absolute right-0 mt-4 w-64 bg-[#000516]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50 py-2"
                   >
                     <div className="max-h-[70vh] overflow-y-auto custom-scrollbar">
+                      <button
+                        onClick={() => {
+                          setActiveCategory('Full Gallery');
+                          setView('gallery');
+                          setIsCategoryOpen(false);
+                        }}
+                        className={cn(
+                          "w-full text-left px-6 py-3 text-[10px] tracking-[0.2em] uppercase transition-colors hover:bg-white/5 border-b border-white/5",
+                          activeCategory === 'Full Gallery' ? "text-[#5f8d8d] bg-white/5" : "text-gray-300 font-bold"
+                        )}
+                      >
+                        Full Gallery
+                      </button>
                       {CATEGORIES.map((category) => (
                         <button
                           key={category}
