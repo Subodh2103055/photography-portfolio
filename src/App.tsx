@@ -3,7 +3,26 @@ import { motion, AnimatePresence } from 'motion/react';
 import { CATEGORIES, PHOTOS as INITIAL_PHOTOS } from './constants';
 import { Category, Photo } from './types';
 import { cn } from './lib/utils';
-import { Camera, Instagram, Mail, Facebook, Globe, Loader2, ChevronDown, Wand2, CheckCircle2, AlertCircle, Heart, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { 
+  Camera, 
+  Instagram, 
+  Mail, 
+  Facebook, 
+  Globe, 
+  Loader2, 
+  ChevronDown, 
+  Wand2, 
+  CheckCircle2, 
+  AlertCircle, 
+  Heart, 
+  X, 
+  ChevronLeft, 
+  ChevronRight,
+  Home as HomeIcon,
+  Info,
+  MessageSquare,
+  Layers
+} from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { db, auth, googleProvider, databaseId } from './firebase';
 import { signInWithPopup, signInAnonymously } from 'firebase/auth';
@@ -842,40 +861,46 @@ export default function App() {
             onClick={() => setView('gallery')}
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
-            className="flex items-center gap-2 cursor-pointer min-w-0"
+            className="flex items-center gap-2 cursor-pointer min-w-0 shrink-0"
           >
             <Camera className="w-5 h-5 md:w-6 md:h-6 text-[#5f8d8d] shrink-0" />
-            <span className="font-bengali text-base md:text-xl font-bold tracking-wide truncate">চতুর্ভুজে বন্দী মুহূর্ত</span>
+            <span className="font-bengali text-sm sm:text-base md:text-xl font-bold tracking-wide whitespace-nowrap">চতুর্ভুজে বন্দী মুহূর্ত</span>
           </motion.button>
           
-          <div className="flex gap-3 md:gap-8 text-[10px] md:text-sm font-medium tracking-widest uppercase text-gray-400 shrink-0">
+          <div className="flex gap-4 md:gap-8 text-[10px] md:text-sm font-medium tracking-widest uppercase text-gray-400 shrink-0 items-center">
             <button 
               onClick={() => {
                 setView('gallery');
                 setActiveCategory('All');
                 setIsCategoryOpen(false);
               }}
-              className={cn("hover:text-[#5f8d8d] transition-colors", view === 'gallery' && activeCategory === 'All' && "text-[#5f8d8d]")}
+              className={cn("hover:text-[#5f8d8d] transition-colors flex items-center gap-1", view === 'gallery' && activeCategory === 'All' && "text-[#5f8d8d]")}
+              title="Home"
             >
-              Home
+              <HomeIcon className="w-4 h-4 md:hidden" />
+              <span className="hidden md:inline">Home</span>
             </button>
             <button 
               onClick={() => {
                 setView('about');
                 setIsCategoryOpen(false);
               }}
-              className={cn("hover:text-[#5f8d8d] transition-colors", view === 'about' && "text-[#5f8d8d]")}
+              className={cn("hover:text-[#5f8d8d] transition-colors flex items-center gap-1", view === 'about' && "text-[#5f8d8d]")}
+              title="About"
             >
-              About
+              <Info className="w-4 h-4 md:hidden" />
+              <span className="hidden md:inline">About</span>
             </button>
             <button 
               onClick={() => {
                 setView('comments');
                 setIsCategoryOpen(false);
               }}
-              className={cn("hover:text-[#5f8d8d] transition-colors", view === 'comments' && "text-[#5f8d8d]")}
+              className={cn("hover:text-[#5f8d8d] transition-colors flex items-center gap-1", view === 'comments' && "text-[#5f8d8d]")}
+              title="Comments"
             >
-              Comments
+              <MessageSquare className="w-4 h-4 md:hidden" />
+              <span className="hidden md:inline">Comments</span>
             </button>
             
             {/* Category Dropdown */}
@@ -886,9 +911,11 @@ export default function App() {
                   "flex items-center gap-1 hover:text-[#5f8d8d] transition-colors",
                   activeCategory !== 'All' && activeCategory !== 'Full Gallery' && view === 'gallery' && "text-[#5f8d8d]"
                 )}
+                title="Categories"
               >
-                Category
-                <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", isCategoryOpen && "rotate-180")} />
+                <Layers className="w-4 h-4 md:hidden" />
+                <span className="hidden md:inline">Category</span>
+                <ChevronDown className={cn("w-3 h-3 md:w-4 md:h-4 transition-transform duration-300", isCategoryOpen && "rotate-180")} />
               </button>
 
               <AnimatePresence>
