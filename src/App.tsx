@@ -1711,7 +1711,7 @@ function PhotoCard({
       />
       
       {/* Overlay */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-8">
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-500 flex flex-col justify-end p-4 md:p-8">
         <div className="flex justify-between items-end">
           <button 
             onClick={onLike}
@@ -1723,7 +1723,7 @@ function PhotoCard({
             >
               <Heart 
                 className={cn(
-                  "w-6 h-6 transition-all duration-300",
+                  "w-5 h-5 md:w-6 md:h-6 transition-all duration-300",
                   isLiked ? "fill-red-500 text-red-500" : "text-white group-hover/heart:text-red-400"
                 )} 
               />
