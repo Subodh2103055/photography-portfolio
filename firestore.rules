@@ -36,6 +36,17 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    match /site_comments/{commentId} {
+      allow read: if true;
+      allow create: if request.resource.data.nickname is string && 
+                      request.resource.data.nickname.size() > 0 &&
+                      request.resource.data.nickname.size() < 50 &&
+                      request.resource.data.text is string &&
+                      request.resource.data.text.size() > 0 &&
+                      request.resource.data.text.size() < 1000;
+      allow delete: if isAdmin();
+    }
+
     // Allow recursive matches for subcollections just in case
     match /{path=**} {
       allow read: if true;

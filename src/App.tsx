@@ -24,6 +24,13 @@ import {
   runTransaction
 } from 'firebase/firestore';
 
+interface SiteComment {
+  id: string;
+  nickname: string;
+  text: string;
+  createdAt: any;
+}
+
 const CalendarDigit = ({ digit }: { digit: string; key?: string }) => (
   <motion.div 
     initial={{ rotateX: -90, opacity: 0 }}
@@ -57,7 +64,7 @@ const CalendarCounter = ({ count }: { count: number }) => {
 
 export default function App() {
   const [activeCategory, setActiveCategory] = useState<Category>('All');
-  const [view, setView] = useState<'gallery' | 'about'>('gallery');
+  const [view, setView] = useState<'gallery' | 'about' | 'comments'>('gallery');
   const [photos, setPhotos] = useState<Photo[]>(INITIAL_PHOTOS);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +105,9 @@ export default function App() {
     total: number;
     lastTag: string;
   } | null>(null);
+
+  const [siteComments, setSiteComments] = useState<SiteComment[]>([]);
+  const [isPostingComment, setIsPostingComment] = useState(false);
 
   // Use a ref to track likes in progress to avoid race conditions
   const likesInProgress = useRef<Record<string, boolean>>({});
@@ -554,6 +564,23 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Listen to Site Comments
+  useEffect(() => {
+    if (!db || !db.type && Object.keys(db).length === 0) return;
+    const q = query(collection(db, 'site_comments'), orderBy('createdAt', 'desc'), limit(100));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const comments: SiteComment[] = [];
+      snapshot.forEach((doc) => {
+        comments.push({ id: doc.id, ...doc.data() } as SiteComment);
+      });
+      setSiteComments(comments);
+    }, (error) => {
+      console.error("Firestore Comments Listener Error:", error);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   const handleLike = async (photoId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     
@@ -838,6 +865,15 @@ export default function App() {
             >
               About
             </button>
+            <button 
+              onClick={() => {
+                setView('comments');
+                setIsCategoryOpen(false);
+              }}
+              className={cn("hover:text-[#5f8d8d] transition-colors", view === 'comments' && "text-[#5f8d8d]")}
+            >
+              Comments
+            </button>
             
             {/* Category Dropdown */}
             <div className="relative" ref={dropdownRef}>
@@ -1049,6 +1085,117 @@ export default function App() {
                   )}
                 </>
               )}
+            </motion.div>
+          ) : view === 'comments' ? (
+            <motion.div
+              key="comments"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.5 }}
+              className="max-w-4xl mx-auto py-12 px-4"
+            >
+              <div className="text-center mb-16">
+                <span className="text-[10px] uppercase tracking-[0.4em] text-gray-500 mb-2 block italic">Guestbook</span>
+                <h2 className="text-4xl font-light tracking-tight text-white">Community Voices</h2>
+                <div className="w-24 h-px bg-[#5f8d8d] mx-auto mt-4 opacity-50" />
+              </div>
+
+              {/* Comment Form */}
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-6 md:p-8 mb-16">
+                <form 
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    const form = e.currentTarget;
+                    const nickname = (form.elements.namedItem('nickname') as HTMLInputElement).value;
+                    const text = (form.elements.namedItem('comment') as HTMLTextAreaElement).value;
+                    
+                    if (!nickname.trim() || !text.trim()) return;
+                    
+                    setIsPostingComment(true);
+                    try {
+                      await setDoc(doc(collection(db, 'site_comments')), {
+                        nickname: nickname.trim(),
+                        text: text.trim(),
+                        createdAt: serverTimestamp()
+                      });
+                      form.reset();
+                    } catch (err) {
+                      console.error("Failed to post comment:", err);
+                      alert("Failed to post comment. Please try again.");
+                    } finally {
+                      setIsPostingComment(false);
+                    }
+                  }}
+                  className="space-y-6"
+                >
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase tracking-widest text-gray-400 ml-1">Your Nickname</label>
+                    <input 
+                      name="nickname"
+                      required
+                      placeholder="e.g. Traveler"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#5f8d8d] transition-colors"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase tracking-widest text-gray-400 ml-1">Message</label>
+                    <textarea 
+                      name="comment"
+                      required
+                      placeholder="Share your thoughts about the gallery..."
+                      rows={4}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#5f8d8d] transition-colors resize-none"
+                    />
+                  </div>
+                  <button 
+                    disabled={isPostingComment}
+                    className="w-full py-4 bg-white text-black text-xs font-bold uppercase tracking-[0.2em] rounded-xl hover:bg-gray-200 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isPostingComment ? <Loader2 className="w-4 h-4 animate-spin" /> : "Post Comment"}
+                  </button>
+                </form>
+              </div>
+
+              {/* Comments List */}
+              <div className="space-y-6">
+                {siteComments.length === 0 ? (
+                  <div className="text-center py-20 text-gray-500 italic">
+                    <p className="text-sm font-light">No comments yet. Be the first to say hello!</p>
+                  </div>
+                ) : (
+                  siteComments.map((comment) => (
+                    <motion.div 
+                      key={comment.id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="bg-white/5 border border-white/5 rounded-2xl p-6 relative group"
+                    >
+                      <div className="flex justify-between items-start mb-4">
+                        <div>
+                          <h4 className="text-[#5f8d8d] font-medium text-sm tracking-wide">{comment.nickname}</h4>
+                          <span className="text-[10px] text-gray-500 uppercase tracking-tighter">
+                            {comment.createdAt?.toDate ? comment.createdAt.toDate().toLocaleDateString() : 'Just now'}
+                          </span>
+                        </div>
+                        {isAdmin && (
+                          <button 
+                            onClick={async () => {
+                              if (window.confirm("Delete this comment?")) {
+                                await deleteDoc(doc(db, 'site_comments', comment.id));
+                              }
+                            }}
+                            className="opacity-0 group-hover:opacity-100 p-2 text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{comment.text}</p>
+                    </motion.div>
+                  ))
+                )}
+              </div>
             </motion.div>
           ) : (
             <motion.div

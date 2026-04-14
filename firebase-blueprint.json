@@ -71,6 +71,27 @@
         }
       },
       "required": ["categories", "manuallyCategorized", "updatedAt"]
+    },
+    "SiteComment": {
+      "title": "Site Comment",
+      "description": "A global comment left by a visitor.",
+      "type": "object",
+      "properties": {
+        "nickname": {
+          "type": "string",
+          "description": "The name of the commenter."
+        },
+        "text": {
+          "type": "string",
+          "description": "The comment message."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the comment was posted."
+        }
+      },
+      "required": ["nickname", "text", "createdAt"]
     }
   },
   "firestore": {
@@ -89,6 +110,10 @@
     "/photo_overrides/{photoId}": {
       "schema": "PhotoOverride",
       "description": "Stores manual category overrides for photos."
+    },
+    "/site_comments/{commentId}": {
+      "schema": "SiteComment",
+      "description": "Stores global site comments."
     }
   }
 }
