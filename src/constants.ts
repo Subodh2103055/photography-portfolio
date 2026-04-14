@@ -1,7 +1,6 @@
 import { Photo, Category } from './types';
 
 export const CATEGORIES: Category[] = [
-  'All',
   'Solitude & Journey',
   'Resilience & Beauty',
   'Urban Optimism',

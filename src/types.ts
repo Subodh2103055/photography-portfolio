@@ -7,6 +7,7 @@ export interface Photo {
 
 export type Category = 
   | 'All' 
+  | 'Full Gallery'
   | 'Solitude & Journey' 
   | 'Resilience & Beauty' 
   | 'Urban Optimism' 

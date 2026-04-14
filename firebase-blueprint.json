@@ -74,7 +74,7 @@
     },
     "SiteComment": {
       "title": "Site Comment",
-      "description": "A global comment left by a visitor.",
+      "description": "A global comment left by a visitor or an admin reply.",
       "type": "object",
       "properties": {
         "nickname": {
@@ -89,6 +89,14 @@
           "type": "string",
           "format": "date-time",
           "description": "When the comment was posted."
+        },
+        "parentId": {
+          "type": "string",
+          "description": "The ID of the parent comment if this is a reply."
+        },
+        "isAdminReply": {
+          "type": "boolean",
+          "description": "Flag indicating if this is an official reply from the admin."
         }
       },
       "required": ["nickname", "text", "createdAt"]

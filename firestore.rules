@@ -43,7 +43,9 @@ service cloud.firestore {
                       request.resource.data.nickname.size() < 50 &&
                       request.resource.data.text is string &&
                       request.resource.data.text.size() > 0 &&
-                      request.resource.data.text.size() < 1000;
+                      request.resource.data.text.size() < 1000 &&
+                      // If it's a reply or marked as admin, it MUST be from the admin
+                      ((!('parentId' in request.resource.data) && !('isAdminReply' in request.resource.data)) || isAdmin());
       allow delete: if isAdmin();
     }
 

@@ -29,6 +29,8 @@ interface SiteComment {
   nickname: string;
   text: string;
   createdAt: any;
+  parentId?: string;
+  isAdminReply?: boolean;
 }
 
 const CalendarDigit = ({ digit }: { digit: string; key?: string }) => (
@@ -108,6 +110,7 @@ export default function App() {
 
   const [siteComments, setSiteComments] = useState<SiteComment[]>([]);
   const [isPostingComment, setIsPostingComment] = useState(false);
+  const [replyingToId, setReplyingToId] = useState<string | null>(null);
 
   // Use a ref to track likes in progress to avoid race conditions
   const likesInProgress = useRef<Record<string, boolean>>({});
@@ -730,12 +733,12 @@ export default function App() {
   }, [mergedPhotos, photoStats]);
 
   const filteredPhotos = useMemo(() => {
-    if (activeCategory === 'All') return mergedPhotos;
+    if (activeCategory === 'All' || activeCategory === 'Full Gallery') return mergedPhotos;
     return mergedPhotos.filter((photo) => photo.categories.includes(activeCategory));
   }, [activeCategory, mergedPhotos]);
 
   const currentGallery = useMemo(() => {
-    if (activeCategory === 'All') return topPhotos;
+    if (activeCategory === 'All' || activeCategory === 'Full Gallery') return topPhotos;
     return filteredPhotos;
   }, [activeCategory, topPhotos, filteredPhotos]);
 
@@ -858,6 +861,16 @@ export default function App() {
             </button>
             <button 
               onClick={() => {
+                setView('gallery');
+                setActiveCategory('Full Gallery');
+                setIsCategoryOpen(false);
+              }}
+              className={cn("hover:text-[#5f8d8d] transition-colors", view === 'gallery' && activeCategory === 'Full Gallery' && "text-[#5f8d8d]")}
+            >
+              Gallery
+            </button>
+            <button 
+              onClick={() => {
                 setView('about');
                 setIsCategoryOpen(false);
               }}
@@ -881,7 +894,7 @@ export default function App() {
                 onClick={() => setIsCategoryOpen(!isCategoryOpen)}
                 className={cn(
                   "flex items-center gap-1 hover:text-[#5f8d8d] transition-colors",
-                  activeCategory !== 'All' && view === 'gallery' && "text-[#5f8d8d]"
+                  activeCategory !== 'All' && activeCategory !== 'Full Gallery' && view === 'gallery' && "text-[#5f8d8d]"
                 )}
               >
                 Category
@@ -997,22 +1010,27 @@ export default function App() {
                   {/* Call to Action */}
                   <section className="text-center py-20 border-y border-white/5">
                     <p className="text-gray-400 font-light tracking-widest uppercase text-xs mb-8">Explore the Collection</p>
-                    <div className="flex flex-wrap justify-center gap-4">
+                    <div className="flex flex-wrap justify-center gap-4 mb-10">
                       {CATEGORIES.map((cat) => (
                         <button
                           key={cat}
                           onClick={() => setActiveCategory(cat)}
-                          className={cn(
-                            "px-6 py-3 border border-white/10 rounded-full text-[10px] uppercase tracking-widest transition-all",
-                            cat === 'All' 
-                              ? "bg-white/5 border-white/20 hover:bg-white/10" 
-                              : "hover:bg-[#5f8d8d] hover:border-[#5f8d8d] hover:text-white"
-                          )}
+                          className="px-6 py-3 border border-white/10 rounded-full text-[10px] uppercase tracking-widest hover:bg-[#5f8d8d] hover:border-[#5f8d8d] hover:text-white transition-all"
                         >
                           {cat}
                         </button>
                       ))}
                     </div>
+                    
+                    <button 
+                      onClick={() => setActiveCategory('Full Gallery')}
+                      className="group relative px-10 py-4 overflow-hidden rounded-full bg-white/5 border border-white/10 transition-all hover:border-[#5f8d8d]/50"
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-r from-[#5f8d8d]/0 via-[#5f8d8d]/10 to-[#5f8d8d]/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
+                      <span className="relative text-[10px] uppercase tracking-[0.3em] font-bold text-gray-300 group-hover:text-white transition-colors">
+                        View Full Gallery <span className="text-[#5f8d8d] ml-2">({totalPhotoCount || 1091})</span>
+                      </span>
+                    </button>
                   </section>
                 </div>
               ) : (
@@ -1023,9 +1041,14 @@ export default function App() {
                     className="mb-12 text-center"
                   >
                     <span className="text-[10px] uppercase tracking-[0.4em] text-gray-500 mb-2 block">Viewing Category</span>
-                    <h2 className="text-3xl font-light tracking-tight text-[#5f8d8d]">{activeCategory}</h2>
+                    <h2 className="text-3xl font-light tracking-tight text-[#5f8d8d]">
+                      {activeCategory === 'Full Gallery' ? 'The Full Collection' : activeCategory}
+                    </h2>
                     <button 
-                      onClick={() => setActiveCategory('All')}
+                      onClick={() => {
+                        setActiveCategory('All');
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
                       className="mt-4 text-[10px] uppercase tracking-widest text-gray-400 hover:text-white transition-colors"
                     >
                       Back to Featured
@@ -1158,41 +1181,168 @@ export default function App() {
               </div>
 
               {/* Comments List */}
-              <div className="space-y-6">
+              <div className="space-y-8">
                 {siteComments.length === 0 ? (
                   <div className="text-center py-20 text-gray-500 italic">
                     <p className="text-sm font-light">No comments yet. Be the first to say hello!</p>
                   </div>
                 ) : (
-                  siteComments.map((comment) => (
-                    <motion.div 
-                      key={comment.id}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className="bg-white/5 border border-white/5 rounded-2xl p-6 relative group"
-                    >
-                      <div className="flex justify-between items-start mb-4">
-                        <div>
-                          <h4 className="text-[#5f8d8d] font-medium text-sm tracking-wide">{comment.nickname}</h4>
-                          <span className="text-[10px] text-gray-500 uppercase tracking-tighter">
-                            {comment.createdAt?.toDate ? comment.createdAt.toDate().toLocaleDateString() : 'Just now'}
-                          </span>
+                  siteComments.filter(c => !c.parentId).map((comment) => (
+                    <div key={comment.id} className="space-y-4">
+                      <motion.div 
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="bg-white/5 border border-white/5 rounded-2xl p-6 relative group"
+                      >
+                        <div className="flex justify-between items-start mb-4">
+                          <div className="flex items-center gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-[#5f8d8d] font-medium text-sm tracking-wide">{comment.nickname}</h4>
+                                {comment.isAdminReply && (
+                                  <span className="px-2 py-0.5 bg-[#5f8d8d]/20 text-[#5f8d8d] text-[8px] uppercase tracking-widest rounded-full border border-[#5f8d8d]/30 font-bold">
+                                    Creator
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-gray-500 uppercase tracking-tighter">
+                                {comment.createdAt?.toDate ? comment.createdAt.toDate().toLocaleDateString() : 'Just now'}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {isAdmin && (
+                              <button 
+                                onClick={() => setReplyingToId(replyingToId === comment.id ? null : comment.id)}
+                                className="p-2 text-gray-400 hover:text-[#5f8d8d] hover:bg-white/5 rounded-lg transition-all text-[10px] uppercase tracking-widest font-bold"
+                              >
+                                {replyingToId === comment.id ? "Cancel" : "Reply"}
+                              </button>
+                            )}
+                            {isAdmin && (
+                              <button 
+                                onClick={async () => {
+                                  if (window.confirm("Delete this comment and all its replies?")) {
+                                    // Delete replies first
+                                    const replies = siteComments.filter(r => r.parentId === comment.id);
+                                    for (const r of replies) {
+                                      await deleteDoc(doc(db, 'site_comments', r.id));
+                                    }
+                                    await deleteDoc(doc(db, 'site_comments', comment.id));
+                                  }
+                                }}
+                                className="opacity-0 group-hover:opacity-100 p-2 text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        {isAdmin && (
-                          <button 
-                            onClick={async () => {
-                              if (window.confirm("Delete this comment?")) {
-                                await deleteDoc(doc(db, 'site_comments', comment.id));
-                              }
-                            }}
-                            className="opacity-0 group-hover:opacity-100 p-2 text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
+                        <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{comment.text}</p>
+                      </motion.div>
+
+                      {/* Reply Form (Admin Only) */}
+                      <AnimatePresence>
+                        {replyingToId === comment.id && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            className="ml-8 md:ml-12 bg-white/5 border border-[#5f8d8d]/30 rounded-2xl p-6"
                           >
-                            <X className="w-4 h-4" />
-                          </button>
+                            <form 
+                              onSubmit={async (e) => {
+                                e.preventDefault();
+                                const form = e.currentTarget;
+                                const text = (form.elements.namedItem('reply') as HTMLTextAreaElement).value;
+                                if (!text.trim()) return;
+                                
+                                setIsPostingComment(true);
+                                try {
+                                  await setDoc(doc(collection(db, 'site_comments')), {
+                                    nickname: "মোঃ নাছির পারভেজ",
+                                    text: text.trim(),
+                                    createdAt: serverTimestamp(),
+                                    parentId: comment.id,
+                                    isAdminReply: true
+                                  });
+                                  setReplyingToId(null);
+                                  form.reset();
+                                } catch (err) {
+                                  console.error("Failed to post reply:", err);
+                                  alert("Failed to post reply.");
+                                } finally {
+                                  setIsPostingComment(false);
+                                }
+                              }}
+                              className="space-y-4"
+                            >
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-[10px] uppercase tracking-widest text-[#5f8d8d] font-bold">Replying as Creator</span>
+                              </div>
+                              <textarea 
+                                name="reply"
+                                required
+                                placeholder="Write your reply..."
+                                rows={3}
+                                className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#5f8d8d] transition-colors resize-none"
+                              />
+                              <div className="flex justify-end gap-3">
+                                <button 
+                                  type="button"
+                                  onClick={() => setReplyingToId(null)}
+                                  className="px-4 py-2 text-[10px] uppercase tracking-widest text-gray-500 hover:text-white transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                                <button 
+                                  disabled={isPostingComment}
+                                  className="px-6 py-2 bg-[#5f8d8d] text-white text-[10px] font-bold uppercase tracking-widest rounded-lg hover:bg-[#4a6e6e] transition-all disabled:opacity-50 flex items-center gap-2"
+                                >
+                                  {isPostingComment ? <Loader2 className="w-3 h-3 animate-spin" /> : "Send Reply"}
+                                </button>
+                              </div>
+                            </form>
+                          </motion.div>
                         )}
+                      </AnimatePresence>
+
+                      {/* Nested Replies */}
+                      <div className="ml-8 md:ml-12 space-y-4">
+                        {siteComments.filter(r => r.parentId === comment.id).map((reply) => (
+                          <motion.div 
+                            key={reply.id}
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            className="bg-white/5 border-l-2 border-[#5f8d8d]/30 rounded-r-2xl p-5 relative group"
+                          >
+                            <div className="flex justify-between items-start mb-3">
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-[#5f8d8d] font-medium text-xs tracking-wide">{reply.nickname}</h4>
+                                {reply.isAdminReply && (
+                                  <span className="px-2 py-0.5 bg-[#5f8d8d]/20 text-[#5f8d8d] text-[7px] uppercase tracking-widest rounded-full border border-[#5f8d8d]/30 font-bold">
+                                    Creator
+                                  </span>
+                                )}
+                              </div>
+                              {isAdmin && (
+                                <button 
+                                  onClick={async () => {
+                                    if (window.confirm("Delete this reply?")) {
+                                      await deleteDoc(doc(db, 'site_comments', reply.id));
+                                    }
+                                  }}
+                                  className="opacity-0 group-hover:opacity-100 p-1.5 text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                            <p className="text-gray-400 text-xs leading-relaxed whitespace-pre-wrap">{reply.text}</p>
+                          </motion.div>
+                        ))}
                       </div>
-                      <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{comment.text}</p>
-                    </motion.div>
+                    </div>
                   ))
                 )}
               </div>
