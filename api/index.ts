@@ -13,6 +13,7 @@ app.get('/api/photos', async (req, res) => {
   const apiSecret = (process.env.CLOUDINARY_API_SECRET || '').trim();
   const cursor = req.query.cursor as string;
   const limit = parseInt(req.query.limit as string) || 50;
+  const sort = (req.query.sort as string) === 'desc' ? 'desc' : 'asc';
 
   if (!cloudName || !apiKey || !apiSecret) {
     return res.status(500).json({ 
@@ -31,7 +32,7 @@ app.get('/api/photos', async (req, res) => {
   try {
     const searchExpression = cloudinary.search
       .expression('resource_type:image')
-      .sort_by('created_at', 'asc')
+      .sort_by('created_at', sort)
       .with_field('tags')
       .with_field('context')
       .max_results(limit);

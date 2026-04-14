@@ -30,15 +30,6 @@ if (isFirebaseConfigured) {
     auth = getAuth(app);
     db = getFirestore(app, databaseId);
     googleProvider = new GoogleAuthProvider();
-
-    console.log("Firebase initialized successfully with project:", firebaseConfig.projectId, "Database:", databaseId);
-
-    // Sign in anonymously to allow likes without forced login
-    signInAnonymously(auth).then(() => {
-      console.log("Signed in anonymously as:", auth.currentUser?.uid);
-    }).catch((error) => {
-      console.error("Error signing in anonymously. Make sure 'Anonymous' is enabled in Firebase Console > Authentication > Sign-in method.", error);
-    });
   } catch (error) {
     console.error("Error initializing Firebase:", error);
     auth = { onAuthStateChanged: () => () => {} };

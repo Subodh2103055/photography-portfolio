@@ -6,7 +6,7 @@ import { cn } from './lib/utils';
 import { Camera, Instagram, Mail, Facebook, Globe, Loader2, ChevronDown, Wand2, CheckCircle2, AlertCircle, Heart, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { db, auth, googleProvider, databaseId } from './firebase';
-import { signInWithPopup } from 'firebase/auth';
+import { signInWithPopup, signInAnonymously } from 'firebase/auth';
 import { 
   doc, 
   getDoc, 
@@ -111,40 +111,6 @@ export default function App() {
   }, [activeCategory]);
 
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && nextCursor && !isFetchingMore) {
-          fetchMorePhotos();
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    if (loadMoreRef.current) {
-      observer.observe(loadMoreRef.current);
-    }
-
-    return () => observer.disconnect();
-  }, [view, activeCategory, nextCursor, isFetchingMore]);
-
-  async function fetchMorePhotos() {
-    if (!nextCursor || isFetchingMore) return;
-    setIsFetchingMore(true);
-    try {
-      const response = await fetch(`/api/photos?cursor=${encodeURIComponent(nextCursor)}&limit=50`);
-      if (response.ok) {
-        const data = await response.json();
-        setPhotos(prev => [...prev, ...data.photos]);
-        setNextCursor(data.nextCursor);
-      }
-    } catch (err) {
-      console.error('Error fetching more photos:', err);
-    } finally {
-      setIsFetchingMore(false);
-    }
-  }
-
-  useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsCategoryOpen(false);
@@ -171,10 +137,40 @@ export default function App() {
   }, []);
 
   // Initialize Gemini
-  const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' }), []);
+  const ai = useMemo(() => {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) {
+      console.warn("GEMINI_API_KEY is missing from environment variables.");
+      return null;
+    }
+    try {
+      return new GoogleGenAI({ apiKey: key });
+    } catch (err) {
+      console.error("Failed to initialize GoogleGenAI:", err);
+      return null;
+    }
+  }, []);
+
+  const [user, setUser] = useState<any>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const isAdmin = user?.email === 'nasirparvez2002@gmail.com';
+
+  const mergedPhotos = useMemo(() => {
+    return photos.map(photo => {
+      const override = photoOverrides[photo.id];
+      if (override) {
+        return { ...photo, categories: override.categories };
+      }
+      return photo;
+    });
+  }, [photos, photoOverrides]);
+
+  const isProcessingRef = useRef(false);
 
   // Auto-tagging processor
   useEffect(() => {
+    if (!isAutoTagging || !taggingSession || isProcessingRef.current) return;
+    
     let isMounted = true;
     
     async function processNext() {
@@ -183,36 +179,61 @@ export default function App() {
           setIsAutoTagging(false);
           localStorage.removeItem('ai_tagging_session');
           setTaggingSession(null);
-          alert('Auto-tagging complete!');
-          // Refresh photos
-          const response = await fetch('/api/photos?limit=50');
-          const data = await response.json();
-          if (data && data.photos) {
-            setPhotos(data.photos);
-            setNextCursor(data.nextCursor);
+          alert('Auto-tagging complete! All your photos have been organized.');
+          // Refresh photos - Merge instead of replace to keep the gallery stable
+          try {
+            const response = await fetch('/api/photos?limit=50');
+            const data = await response.json();
+            if (data && data.photos) {
+              setPhotos(prev => {
+                const existingIds = new Set(prev.map(p => p.id));
+                const uniqueNew = data.photos.filter((p: any) => !existingIds.has(p.id));
+                // Also update existing ones with fresh data from server
+                return prev.map(p => {
+                  const fresh = data.photos.find((fp: any) => fp.id === p.id);
+                  return fresh ? fresh : p;
+                }).concat(uniqueNew);
+              });
+              setNextCursor(data.nextCursor);
+            }
+          } catch (e) {
+            console.error("Failed to refresh photos after tagging", e);
           }
         }
         return;
       }
 
+      if (!ai) {
+        console.error("[AutoTag] AI not initialized.");
+        setIsAutoTagging(false);
+        alert("AI Assistant not ready. Please check your GEMINI_API_KEY.");
+        return;
+      }
+
+      isProcessingRef.current = true;
       const photoId = taggingSession.ids[taggingSession.current];
       const photo = mergedPhotos.find(p => p.id === photoId);
 
       if (!photo) {
-        // Skip if photo not found
+        console.warn(`[AutoTag] Photo ${photoId} not found in gallery. Skipping...`);
         const nextSession = { ...taggingSession, current: taggingSession.current + 1 };
         setTaggingSession(nextSession);
         localStorage.setItem('ai_tagging_session', JSON.stringify(nextSession));
+        isProcessingRef.current = false;
         return;
       }
 
       try {
+        console.log(`[AutoTag] Processing ${taggingSession.current + 1}/${taggingSession.total}: ${photoId}`);
+        
         // 1. Fetch image
-        const response = await fetch(photo.imageUrl);
-        const blob = await response.blob();
-        const base64Data = await new Promise<string>((resolve) => {
+        const imgRes = await fetch(photo.imageUrl);
+        if (!imgRes.ok) throw new Error(`Failed to fetch image: ${imgRes.statusText}`);
+        const blob = await imgRes.blob();
+        const base64Data = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+          reader.onerror = reject;
           reader.readAsDataURL(blob);
         });
 
@@ -223,21 +244,33 @@ export default function App() {
         Return ONLY the category name. If none fit perfectly, return 'Uncategorized'.`;
 
         const result = await ai.models.generateContent({
-          model: "gemini-1.5-flash",
-          contents: [{ parts: [{ inlineData: { mimeType: blob.type, data: base64Data } }, { text: prompt }] }]
+          model: "gemini-3-flash-preview",
+          contents: { 
+            parts: [
+              { inlineData: { mimeType: blob.type, data: base64Data } }, 
+              { text: prompt }
+            ] 
+          }
         });
 
         const suggestedTag = result.text?.trim().replace(/\.$/, '') || 'Uncategorized';
         const finalTag = CATEGORIES.find(c => c.toLowerCase() === suggestedTag.toLowerCase()) || 'Uncategorized';
 
+        console.log(`[AutoTag] AI suggested: ${finalTag} for ${photoId}`);
+
         // 3. Update backend
-        await fetch('/api/admin/update-tag', {
+        const updateRes = await fetch('/api/admin/update-tag', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ publicId: photo.id, tag: finalTag })
         });
 
+        if (!updateRes.ok) throw new Error(`Failed to update tag in backend: ${updateRes.statusText}`);
+
         if (isMounted) {
+          // Update local photos state so UI reflects the change immediately
+          setPhotos(prev => prev.map(p => p.id === photoId ? { ...p, categories: [finalTag] } : p));
+
           const nextSession = { 
             ...taggingSession, 
             current: taggingSession.current + 1,
@@ -251,59 +284,77 @@ export default function App() {
           });
           localStorage.setItem('ai_tagging_session', JSON.stringify(nextSession));
         }
-      } catch (err) {
-        console.error('Failed to tag photo:', photoId, err);
-        // Wait a bit and retry or skip
-        await new Promise(r => setTimeout(r, 2000));
+      } catch (err: any) {
+        console.error('[AutoTag] Error processing photo:', photoId, err);
         if (isMounted) {
-          // For now, we just skip to the next one to avoid getting stuck
+          // Skip on error after a short delay
+          await new Promise(r => setTimeout(r, 1000));
           const nextSession = { ...taggingSession, current: taggingSession.current + 1 };
           setTaggingSession(nextSession);
           localStorage.setItem('ai_tagging_session', JSON.stringify(nextSession));
         }
+      } finally {
+        isProcessingRef.current = false;
       }
     }
 
-    const timer = setTimeout(processNext, 1000); // 1 second delay between photos
+    const timer = setTimeout(processNext, 1500);
     return () => {
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [isAutoTagging, taggingSession, photos, ai, CATEGORIES, photoOverrides]);
+  }, [isAutoTagging, taggingSession?.current, taggingSession?.total, photos, ai, CATEGORIES, photoOverrides, mergedPhotos]);
+
+  const [isStartingTagging, setIsStartingTagging] = useState(false);
 
   const handleStartAutoTag = async () => {
-    setIsLoading(true);
+    setIsStartingTagging(true);
+    console.log("[AutoTag] Starting auto-tagging process...");
+    
     try {
-      // Fetch a fresh batch of 100 photos to find uncategorized ones
-      const response = await fetch('/api/photos?limit=100');
-      if (!response.ok) throw new Error("Failed to fetch photos from server");
-      
-      const data = await response.json();
-      const freshPhotos = data.photos || [];
-      
-      // Update local state with fresh photos
-      setPhotos(freshPhotos);
-      setNextCursor(data.nextCursor);
+      // Official categories that count as "categorized"
+      const VALID_CATEGORIES = CATEGORIES.filter(c => c !== 'All' && c !== 'Uncategorized');
 
       const getUncategorized = (items: Photo[]) => items.filter(p => {
         const override = photoOverrides[p.id];
         const isManuallyCategorized = override?.manuallyCategorized;
         
-        // A photo needs tagging if it's not manually sorted AND:
-        // 1. It has no override and the original categories are empty/uncategorized
-        // 2. OR it has an override but the override categories are empty/uncategorized
-        const originalIsUncategorized = p.categories.length === 0 || p.categories.includes('Uncategorized');
-        const overrideIsUncategorized = !override || override.categories.length === 0 || (override.categories.length === 1 && override.categories[0] === 'Uncategorized');
+        // Use override categories if they exist, otherwise use original
+        const currentCategories = override ? override.categories : p.categories;
         
-        const needsTagging = !isManuallyCategorized && (override ? overrideIsUncategorized : originalIsUncategorized);
-        return needsTagging;
+        // A photo needs tagging if it has NO categories from our official list (case-insensitive)
+        const hasValidCategory = currentCategories.some(cat => 
+          cat !== 'Uncategorized' && 
+          VALID_CATEGORIES.some(vc => vc.toLowerCase() === cat.toLowerCase())
+        );
+        
+        return !isManuallyCategorized && !hasValidCategory;
       });
 
-      const photosToTag = getUncategorized(freshPhotos);
-      console.log(`[AutoTag] Found ${photosToTag.length} uncategorized photos out of ${freshPhotos.length} fetched.`);
+      let photosToTag = getUncategorized(photos);
+      console.log(`[AutoTag] Found ${photosToTag.length} uncategorized photos in current view.`);
       
       if (photosToTag.length === 0) {
-        alert('No uncategorized photos found in the first 100 images. If you have more photos, please scroll down to load them, then try again.');
+        console.log("[AutoTag] None in view, fetching a larger batch (200) of NEWEST photos to search deeper...");
+        const response = await fetch('/api/photos?limit=200&sort=desc');
+        if (response.ok) {
+          const data = await response.json();
+          const freshPhotos = data.photos || [];
+          photosToTag = getUncategorized(freshPhotos);
+          if (photosToTag.length > 0) {
+            setPhotos(prev => {
+              const existingIds = new Set(prev.map(p => p.id));
+              const uniqueNew = freshPhotos.filter((p: any) => !existingIds.has(p.id));
+              return [...prev, ...uniqueNew];
+            });
+            console.log(`[AutoTag] Found ${photosToTag.length} uncategorized photos in deep search.`);
+          }
+        }
+      }
+      
+      if (photosToTag.length === 0) {
+        alert('I checked your 200 most recent photos and they all seem to be categorized! \n\nIf you have older photos that still need sorting, please scroll down to load them into the gallery first, then try clicking this button again.');
+        setIsStartingTagging(false);
         return;
       }
 
@@ -314,15 +365,16 @@ export default function App() {
         lastTag: ''
       };
 
+      isProcessingRef.current = false;
       setTaggingSession(newSession);
       setTaggingProgress({ current: 0, total: newSession.total, lastTag: '' });
       localStorage.setItem('ai_tagging_session', JSON.stringify(newSession));
       setIsAutoTagging(true);
-    } catch (err) {
-      console.error("Error starting auto-tagging:", err);
-      alert("Error starting auto-tagging. Please check your connection.");
+    } catch (err: any) {
+      console.error("[AutoTag] Error:", err);
+      alert("Something went wrong while starting the AI Assistant. Please try again.");
     } finally {
-      setIsLoading(false);
+      setIsStartingTagging(false);
     }
   };
 
@@ -398,9 +450,6 @@ export default function App() {
     fetchPhotos();
   }, []);
 
-  const [user, setUser] = useState<any>(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-
   useEffect(() => {
     if (!db || !db.type) return;
     
@@ -423,7 +472,6 @@ export default function App() {
     if (!auth || !auth.onAuthStateChanged) return;
     
     const unsubscribeAuth = auth.onAuthStateChanged((u: any) => {
-      console.log("Auth state changed. User:", u?.uid || "Logged out");
       setUser(u);
       setIsAuthReady(true);
     });
@@ -510,9 +558,15 @@ export default function App() {
     e.stopPropagation();
     
     if (!user) {
-      console.warn("Cannot like: User not authenticated");
-      alert("Authentication is still setting up. Please wait a moment and try again. If this persists, Anonymous Auth might not be enabled in the Firebase Console.");
-      return;
+      try {
+        await signInAnonymously(auth);
+        // The onAuthStateChanged will handle setting the user state
+        return; 
+      } catch (err) {
+        console.error("Anon login failed", err);
+        alert("Please sign in to like photos.");
+        return;
+      }
     }
 
     if (likesInProgress.current[photoId]) {
@@ -637,18 +691,6 @@ export default function App() {
     return bengaliRegex.test(text);
   };
 
-  const isAdmin = user?.email === 'nasirparvez2002@gmail.com';
-
-  const mergedPhotos = useMemo(() => {
-    return photos.map(photo => {
-      const override = photoOverrides[photo.id];
-      if (override) {
-        return { ...photo, categories: override.categories };
-      }
-      return photo;
-    });
-  }, [photos, photoOverrides]);
-
   const currentPhoto = useMemo(() => {
     if (!selectedPhoto) return null;
     return mergedPhotos.find(p => p.id === selectedPhoto.id) || selectedPhoto;
@@ -661,7 +703,7 @@ export default function App() {
   }, [mergedPhotos, photoStats]);
 
   const filteredPhotos = useMemo(() => {
-    if (activeCategory === 'All') return []; // Don't show full gallery on home
+    if (activeCategory === 'All') return mergedPhotos;
     return mergedPhotos.filter((photo) => photo.categories.includes(activeCategory));
   }, [activeCategory, mergedPhotos]);
 
@@ -669,6 +711,47 @@ export default function App() {
     if (activeCategory === 'All') return topPhotos;
     return filteredPhotos;
   }, [activeCategory, topPhotos, filteredPhotos]);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          // If we have more photos locally that aren't visible yet, show them
+          if (visibleCount < filteredPhotos.length) {
+            setVisibleCount(prev => prev + 24);
+          } 
+          // If we've shown all local photos but there are more on the server, fetch them
+          else if (nextCursor && !isFetchingMore) {
+            fetchMorePhotos();
+          }
+        }
+      },
+      { threshold: 0.1, rootMargin: '200px' }
+    );
+
+    if (loadMoreRef.current) {
+      observer.observe(loadMoreRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, [view, activeCategory, nextCursor, isFetchingMore, visibleCount, filteredPhotos]);
+
+  async function fetchMorePhotos() {
+    if (!nextCursor || isFetchingMore) return;
+    setIsFetchingMore(true);
+    try {
+      const response = await fetch(`/api/photos?cursor=${encodeURIComponent(nextCursor)}&limit=50`);
+      if (response.ok) {
+        const data = await response.json();
+        setPhotos(prev => [...prev, ...data.photos]);
+        setNextCursor(data.nextCursor);
+      }
+    } catch (err) {
+      console.error('Error fetching more photos:', err);
+    } finally {
+      setIsFetchingMore(false);
+    }
+  }
 
   const handlePrev = (e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -877,13 +960,18 @@ export default function App() {
 
                   {/* Call to Action */}
                   <section className="text-center py-20 border-y border-white/5">
-                    <p className="text-gray-400 font-light tracking-widest uppercase text-xs mb-8">Want to see more?</p>
+                    <p className="text-gray-400 font-light tracking-widest uppercase text-xs mb-8">Explore the Collection</p>
                     <div className="flex flex-wrap justify-center gap-4">
-                      {CATEGORIES.filter(c => c !== 'All').map((cat) => (
+                      {CATEGORIES.map((cat) => (
                         <button
                           key={cat}
                           onClick={() => setActiveCategory(cat)}
-                          className="px-6 py-3 border border-white/10 rounded-full text-[10px] uppercase tracking-widest hover:bg-[#5f8d8d] hover:border-[#5f8d8d] hover:text-white transition-all"
+                          className={cn(
+                            "px-6 py-3 border border-white/10 rounded-full text-[10px] uppercase tracking-widest transition-all",
+                            cat === 'All' 
+                              ? "bg-white/5 border-white/20 hover:bg-white/10" 
+                              : "hover:bg-[#5f8d8d] hover:border-[#5f8d8d] hover:text-white"
+                          )}
                         >
                           {cat}
                         </button>
@@ -1299,13 +1387,8 @@ export default function App() {
               </div>
             ) : (
               <>
-                <div className="mb-4 p-2 bg-white/5 rounded text-[10px] font-mono text-gray-500">
-                  <p>User: {user?.uid || 'None'}</p>
-                  <p>Auth Ready: {isAuthReady ? 'Yes' : 'No'}</p>
-                  <p>DB ID: {databaseId || '(default)'}</p>
-                </div>
                 <p className="text-xs text-gray-400 mb-6 leading-relaxed">
-                  Upload your photos to Cloudinary, then click below. Gemini will analyze your images and automatically sort them into categories.
+                  Gemini will analyze your uncategorized images and automatically sort them into categories.
                 </p>
 
                 {isAutoTagging ? (
@@ -1367,10 +1450,15 @@ export default function App() {
             ) : (
               <button
                 onClick={handleStartAutoTag}
-                className="w-full py-3 bg-[#5f8d8d] hover:bg-[#4d7373] text-white rounded-xl text-xs font-bold uppercase tracking-widest transition-all shadow-lg shadow-teal-900/20 flex items-center justify-center gap-2"
+                disabled={isStartingTagging}
+                className="w-full py-3 bg-[#5f8d8d] hover:bg-[#4d7373] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold uppercase tracking-widest transition-all shadow-lg shadow-teal-900/20 flex items-center justify-center gap-2"
               >
-                <Wand2 className="w-4 h-4" />
-                Auto-Organize Gallery
+                {isStartingTagging ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Wand2 className="w-4 h-4" />
+                )}
+                {isStartingTagging ? 'Searching Photos...' : 'Auto-Organize Gallery'}
               </button>
             )}
           </>
